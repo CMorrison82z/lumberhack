@@ -1,0 +1,40 @@
+cabal-version:   3.0
+name:            lumberhack
+version:         0.1.0.0
+license:         NONE
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+executable lmhk
+    import:           warnings
+    main-is:          Main.hs
+    other-modules:    Logging
+                      Core
+                      Util
+                      Cli.Commands
+                      Cli.Interface
+    build-depends:    base ^>=4.17.2.1
+                    , filepath ^>= 1.5.4.0
+                    , random
+                    , unix
+                    , vector
+                    , text
+                    , containers
+                    , os-string
+                    , directory
+                    , text-ansi
+                    , optparse-applicative  >=0.18.1.0
+                    -- , wizards -- Interrogative User Input
+                    , directory-ospath-streaming ^>= 0.2.2
+                    , terminal-size
+                    -- , bytestring
+    hs-source-dirs:   app
+    default-extensions:
+        LambdaCase
+        TupleSections
+        NamedFieldPuns
+        ScopedTypeVariables
+    default-language: Haskell2010
