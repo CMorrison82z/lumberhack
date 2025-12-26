@@ -3,7 +3,7 @@ module Core where
 import Debug.Trace
 import System.IO (readFile')
 import System.Posix.Files
-import System.Posix.Types (CIno)
+import System.Posix.Types (CIno(..))
 import qualified System.Posix.Files.PosixString as FilesPosStr
 import System.Directory
 import System.OsPath (OsPath)
@@ -11,6 +11,10 @@ import qualified System.OsPath as OSP
 import System.OsString.Internal.Types (OsString (getOsString), PosixString (getPosixString))
 import Control.Monad (unless, filterM, liftM2, (<=<))
 import Data.Text (Text)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString  as S8
+import Data.Serialize
+import GHC.Generics
 import qualified Data.Text as T
 import Data.Vector (Vector)
 import qualified Data.Vector as V
@@ -21,7 +25,7 @@ import Data.Bool
 import Data.Bits
 import Data.Foldable (traverse_)
 import Data.Maybe (fromJust, fromMaybe, catMaybes)
-import Data.Either (rights, partitionEithers)
+import Data.Either (fromRight, rights, partitionEithers)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as LNE
 import Data.List (find, union, isPrefixOf)
@@ -36,9 +40,23 @@ data App = App {
         taggedInodes :: TaggedInodes,
         userTags :: Vector Text
     }
-    deriving (Show)
+    deriving (Show, Generic)
 
 data QStrategy = QOr | QAnd
+
+instance Serialize Text where
+  put t = put (T.unpack t)
+  get = T.pack <$> get
+
+instance Serialize a => Serialize (Vector a) where
+  put xs = put (V.toList xs)
+  get = V.fromList <$> get
+
+instance Serialize CIno where
+  put (CIno w64) = put w64
+  get = CIno <$> get
+
+instance Serialize App
 
 userQuery App {taggedInodes, userTags} qStrategy tags = do
     let stratF = case qStrategy of
@@ -167,25 +185,30 @@ getAppTmpDir = do
     createDirectory newDir
     return newDir
 
-parseTaggedInodes :: String -> TaggedInodes
-parseTaggedInodes = M.fromList . fmap read . tail . lines
+makeApp :: IO App
+makeApp = appDataFile >>= fmap (fromRight (error "Failed to decode application data") . decode) . S8.readFile
 
-serializeTaggedInodes :: TaggedInodes -> String
-serializeTaggedInodes = unlines . (fileWarningMessage :) . fmap show . M.toList
+writeApp :: App -> IO ()
+writeApp app = appDataFile >>= (flip S8.writeFile $ encode app)
 
-parseTagsList :: String -> Vector Text
-parseTagsList s = V.fromList . fmap T.pack . quotedWords $ fromMaybe "" $ lines s !? 1
-
-serializeTagsList :: Vector Text -> String
-serializeTagsList = (fileWarningMessage ++) . ('\n' :) . wordsToCsv . fmap T.unpack . V.toList
-
-makeApp = App 
-    <$> (taggedInodesDataFile >>= fmap parseTaggedInodes . readFile')
-    <*> (tagsDataFile >>= fmap parseTagsList . readFile')
-
-writeApp App {taggedInodes, userTags} =
-    taggedInodesDataFile >>= (flip writeFile $ serializeTaggedInodes taggedInodes)
-    >> tagsDataFile >>= (flip writeFile $ serializeTagsList userTags)
+-- NOTE: Old Ser/De methods
+-- makeApp = App 
+--     <$> (taggedInodesDataFile >>= fmap parseTaggedInodes . readFile')
+--     <*> (tagsDataFile >>= fmap parseTagsList . readFile')
+-- writeApp App {taggedInodes, userTags} =
+--     taggedInodesDataFile >>= (flip writeFile $ serializeTaggedInodes taggedInodes)
+--     >> tagsDataFile >>= (flip writeFile $ serializeTagsList userTags)
+-- parseTaggedInodes :: String -> TaggedInodes
+-- parseTaggedInodes = M.fromList . fmap read . tail . lines
+--
+-- serializeTaggedInodes :: TaggedInodes -> String
+-- serializeTaggedInodes = unlines . (fileWarningMessage :) . fmap show . M.toList
+--
+-- parseTagsList :: String -> Vector Text
+-- parseTagsList s = V.fromList . fmap T.pack . quotedWords $ fromMaybe "" $ lines s !? 1
+--
+-- serializeTagsList :: Vector Text -> String
+-- serializeTagsList = (fileWarningMessage ++) . ('\n' :) . wordsToCsv . fmap T.unpack . V.toList
 
 fileWarningMessage = "! CORRECTNESS OF THIS APPLICATION HIGHLY DEPENDS ON THE STATE OF THIS FILE. MODIFYING IT DIRECTLY IS LIKELY TO BREAK THE APPLICATION !"
 
@@ -198,6 +221,9 @@ appDataDirectory = getXdgDirectory XdgData appName
 -- NOTE: This is exists 
 storeDataDirectory :: IO FilePath
 storeDataDirectory =  appDataDirectory <&> (</> "store")
+
+appDataFile :: IO FilePath
+appDataFile =  appDataDirectory <&> (</> "appdata")
 
 taggedInodesDataFile :: IO FilePath
 taggedInodesDataFile =  appDataDirectory <&> (</> "tagged_inodes")
